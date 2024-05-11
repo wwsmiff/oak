@@ -3,6 +3,45 @@
 #include <stdexcept>
 #include <string_view>
 
+#define CHECK_AND_PERFORM(op)                                                  \
+  do {                                                                         \
+    if (res.type == LiteralType::NIL || right.type == LiteralType::NIL) {      \
+      res.type = LiteralType::NIL;                                             \
+      right.type = LiteralType::NIL;                                           \
+    } else {                                                                   \
+      if (res.type == LiteralType::INTEGER &&                                  \
+          right.type == LiteralType::INTEGER) {                                \
+        res.as.i64 op right.as.i64;                                            \
+      } else if (res.type == LiteralType::INTEGER &&                           \
+                 right.type == LiteralType::FLOAT) {                           \
+        res.type = LiteralType::FLOAT;                                         \
+        res.as.f64 = res.as.i64;                                               \
+        res.as.f64 op right.as.f64;                                            \
+      } else if (res.type == LiteralType::FLOAT &&                             \
+                 right.type == LiteralType::INTEGER) {                         \
+        right.type = LiteralType::FLOAT;                                       \
+        right.as.f64 = right.as.i64;                                           \
+        res.as.f64 op right.as.f64;                                            \
+      } else if (res.type == LiteralType::FLOAT &&                             \
+                 right.type == LiteralType::FLOAT) {                           \
+        res.as.f64 op right.as.f64;                                            \
+      }                                                                        \
+    }                                                                          \
+  } while (0)
+
+namespace {
+std::ostream &operator<<(std::ostream &os, const Literal &literal) {
+  if (literal.type == LiteralType::NIL) {
+    os << "nil";
+  } else if (literal.type == LiteralType::INTEGER) {
+    os << literal.as.i64;
+  } else if (literal.type == LiteralType::FLOAT) {
+    os << literal.as.f64;
+  }
+  return os;
+}
+}; // namespace
+
 Interpreter::Interpreter() : m_source{}, m_pos{}, m_current_token{} {}
 
 Interpreter::Interpreter(const std::string &source)
@@ -21,7 +60,9 @@ void Interpreter::error(const std::string &message) const {
 
 Token Interpreter::advance() {
   if (m_pos > m_source.size() - 1) {
-    return Token{.type = TokenType::END_OF_FILE, .value = std::nullopt};
+    return Token{.type = TokenType::END_OF_FILE,
+                 .value = std::nullopt,
+                 .id = std::nullopt};
   }
 
   char current_char = m_source.at(m_pos);
@@ -33,57 +74,73 @@ Token Interpreter::advance() {
   }
 
   if (std::isalpha(current_char)) {
-    auto value = parse_id();
-    if (value == "print") {
-      return Token{.type = TokenType::PRINT, .value = std::nullopt};
+    auto id = parse_id();
+    if (id == "print") {
+      return Token{.type = TokenType::PRINT, .value = std::nullopt, .id = id};
+    } else if (id == "nil") {
+      return Token{.type = TokenType::NIL, .value = std::nullopt, .id = id};
     }
-    return Token{.type = TokenType::ID, .value = value};
+    return Token{.type = TokenType::ID, .value = std::nullopt, .id = id};
   }
 
   if (std::isdigit(current_char)) {
     auto value = parse_digit();
-    return Token{.type = TokenType::INTEGER, .value = value};
+    return Token{
+        .type = TokenType::INTEGER, .value = value, .id = std::nullopt};
   }
+
   if (current_char == '+') {
     m_pos++;
-    return Token{.type = TokenType::PLUS, .value = std::nullopt};
+    return Token{
+        .type = TokenType::PLUS, .value = std::nullopt, .id = std::nullopt};
   }
   if (current_char == '-') {
     m_pos++;
     if (m_source.at(m_pos) == '>') {
       m_pos++;
-      return Token{.type = TokenType::REF, .value = std::nullopt};
+      return Token{.type = TokenType::ASSIGN_REF,
+                   .value = std::nullopt,
+                   .id = std::nullopt};
     }
-    return Token{.type = TokenType::MINUS, .value = std::nullopt};
+    return Token{
+        .type = TokenType::MINUS, .value = std::nullopt, .id = std::nullopt};
   }
   if (current_char == '*') {
     m_pos++;
     if (m_source.at(m_pos) == '*') {
       m_pos++;
-      return Token{.type = TokenType::POWER_OF, .value = std::nullopt};
+      return Token{.type = TokenType::POWER_OF,
+                   .value = std::nullopt,
+                   .id = std::nullopt};
     }
-    return Token{.type = TokenType::STAR, .value = std::nullopt};
+    return Token{
+        .type = TokenType::STAR, .value = std::nullopt, .id = std::nullopt};
   }
   if (current_char == '/') {
     m_pos++;
-    return Token{.type = TokenType::SLASH, .value = std::nullopt};
+    return Token{
+        .type = TokenType::SLASH, .value = std::nullopt, .id = std::nullopt};
   }
   if (current_char == '(') {
     m_pos++;
-    return Token{.type = TokenType::LPAREN, .value = std::nullopt};
+    return Token{
+        .type = TokenType::LPAREN, .value = std::nullopt, .id = std::nullopt};
   }
   if (current_char == ')') {
     m_pos++;
-    return Token{.type = TokenType::RPAREN, .value = std::nullopt};
+    return Token{
+        .type = TokenType::RPAREN, .value = std::nullopt, .id = std::nullopt};
   }
 
   if (current_char == '=') {
     m_pos++;
     if (m_source.at(m_pos) == '=') {
       m_pos++;
-      return Token{.type = TokenType::IS_EQ, .value = std::nullopt};
+      return Token{
+          .type = TokenType::IS_EQ, .value = std::nullopt, .id = std::nullopt};
     }
-    return Token{.type = TokenType::ASSIGN, .value = std::nullopt};
+    return Token{
+        .type = TokenType::ASSIGN, .value = std::nullopt, .id = std::nullopt};
   }
 
   error(std::format("Unexpected character: {}", current_char));
@@ -113,16 +170,34 @@ void Interpreter::eat(const TokenType &expected_type) {
   }
 }
 
-int64_t Interpreter::factor() {
+Literal Interpreter::factor() {
   Token token = m_current_token;
-  int64_t res{};
+  Literal res{.type = LiteralType::NIL};
+
   if (token.type == TokenType::INTEGER) {
-    res = std::stoll(token.value.value());
+    if (token.value.value().type == LiteralType::INTEGER ||
+        token.value.value().type == LiteralType::FLOAT) {
+      res = token.value.value();
+    }
     eat(TokenType::INTEGER);
   } else if (token.type == TokenType::ID) {
-    std::string id{token.value.value()};
+    std::string id{token.id.value()};
     if (m_variables.contains(id)) {
-      res = m_variables.at(id);
+      const Literal &literal = m_variables.at(id);
+      if (literal.is_ref) {
+        if (literal.type == LiteralType::INTEGER) {
+          res.as.i64 = *(static_cast<int64_t *>(literal.as.ref));
+          res.type = LiteralType::INTEGER;
+        } else if (literal.type == LiteralType::FLOAT) {
+          res.as.f64 = *(static_cast<float *>(literal.as.ref));
+          res.type = LiteralType::FLOAT;
+        } else if (literal.type == LiteralType::BOOLEAN) {
+          res.as.f64 = *(static_cast<bool *>(literal.as.ref));
+          res.type = LiteralType::BOOLEAN;
+        }
+      } else {
+        res = literal;
+      }
       eat(TokenType::ID);
     } else {
       error(std::format("Variable '{}' does not exist.", id));
@@ -135,8 +210,8 @@ int64_t Interpreter::factor() {
   return res;
 }
 
-int64_t Interpreter::term() {
-  int64_t res = factor();
+Literal Interpreter::term() {
+  Literal res = factor();
   while (m_current_token.type == TokenType::STAR ||
          m_current_token.type == TokenType::SLASH ||
          m_current_token.type == TokenType::POWER_OF) {
@@ -155,17 +230,38 @@ int64_t Interpreter::term() {
       break;
     }
 
-    int64_t right = factor();
+    Literal right = factor();
 
     switch (token.type.value()) {
     case TokenType::STAR:
-      res *= right;
+      CHECK_AND_PERFORM(*=);
       break;
     case TokenType::SLASH:
-      res /= right;
+      CHECK_AND_PERFORM(/=);
       break;
     case TokenType::POWER_OF:
-      res = std::pow(res, right);
+      if (res.type == LiteralType::NIL || right.type == LiteralType::NIL) {
+        res.type = LiteralType::NIL;
+        right.type = LiteralType::NIL;
+      } else {
+        if (res.type == LiteralType::INTEGER &&
+            right.type == LiteralType::INTEGER) {
+          res.as.i64 = std::pow(res.as.i64, right.as.i64);
+        } else if (res.type == LiteralType::INTEGER &&
+                   right.type == LiteralType::FLOAT) {
+          res.type = LiteralType::FLOAT;
+          res.as.f64 = res.as.i64;
+          res.as.f64 = std::pow(res.as.f64, right.as.f64);
+        } else if (res.type == LiteralType::FLOAT &&
+                   right.type == LiteralType::INTEGER) {
+          right.type = LiteralType::FLOAT;
+          right.as.f64 = right.as.i64;
+          res.as.f64 = std::pow(res.as.f64, right.as.f64);
+        } else if (res.type == LiteralType::FLOAT &&
+                   right.type == LiteralType::FLOAT) {
+          res.as.i64 = std::pow(res.as.f64, right.as.f64);
+        }
+      }
       break;
     default:
       break;
@@ -175,8 +271,8 @@ int64_t Interpreter::term() {
   return res;
 }
 
-int64_t Interpreter::expr() {
-  int64_t res = term();
+Literal Interpreter::expr() {
+  Literal res = term();
   while (m_current_token.type == TokenType::PLUS ||
          m_current_token.type == TokenType::MINUS) {
     Token op = m_current_token;
@@ -190,13 +286,13 @@ int64_t Interpreter::expr() {
     default:
       break;
     }
-    int64_t right = term();
+    Literal right = term();
     switch (op.type.value()) {
     case TokenType::PLUS:
-      res += right;
+      CHECK_AND_PERFORM(+=);
       break;
     case TokenType::MINUS:
-      res -= right;
+      CHECK_AND_PERFORM(-=);
       break;
     default:
       error("Unexpected operator.");
@@ -209,21 +305,6 @@ int64_t Interpreter::expr() {
 void Interpreter::run() {
   if (m_current_token.type.has_value()) {
     switch (m_current_token.type.value()) {
-    case TokenType::INTEGER:
-    case TokenType::PLUS:
-    case TokenType::LPAREN:
-    case TokenType::MINUS: {
-      if (m_start_token.type.has_value()) {
-        if (m_start_token.type.value() != TokenType::PRINT) {
-          error("Expected primary expression such as 'print' or '='.");
-          break;
-        } else {
-          int64_t res = expr();
-          std::cout << res << std::endl;
-        }
-      }
-      break;
-    }
     case TokenType::PRINT:
       handle_print();
       break;
@@ -237,17 +318,31 @@ void Interpreter::run() {
   }
 }
 
-std::string Interpreter::parse_digit() {
+Literal Interpreter::parse_digit() {
+  Literal literal{};
   std::string value{};
-  while (std::isdigit(m_source.at(m_pos))) {
+  bool found_dot{};
+  while (std::isdigit(m_source.at(m_pos)) || m_source.at(m_pos) == '.') {
+    if (m_source.at(m_pos) == '.') {
+      found_dot = true;
+    }
     value.push_back(m_source.at(m_pos));
-    if (m_pos < m_source.size() - 1)
+    if (m_pos < m_source.size() - 1) {
       m_pos++;
-    else
+    } else {
       break;
+    }
   }
 
-  return value;
+  if (found_dot) {
+    literal.type = LiteralType::FLOAT;
+    literal.as.f64 = std::stod(value);
+  } else {
+    literal.type = LiteralType::INTEGER;
+    literal.as.i64 = std::stoll(value);
+  }
+
+  return literal;
 }
 
 std::string Interpreter::parse_id() {
@@ -270,26 +365,21 @@ void Interpreter::handle_print() {
   case TokenType::INTEGER:
   case TokenType::PLUS:
   case TokenType::LPAREN:
-  case TokenType::MINUS: {
-    int64_t res = expr();
+  case TokenType::MINUS:
+  case TokenType::NIL:
+  case TokenType::ID: {
+    Literal res = expr();
     std::cout << res << std::endl;
     break;
   }
-  case TokenType::ID: {
-    const std::string &id{m_current_token.value.value()};
-    if (m_variables.contains(id)) {
-      std::cout << m_variables.at(id) << std::endl;
-    } else {
-      error(std::format("Variable '{}' does not exist.", id));
-    }
-  }
+
   default:
     break;
   }
 }
 
 void Interpreter::handle_variable() {
-  std::string id{m_current_token.value.value()};
+  std::string id{m_current_token.id.value()};
   eat(TokenType::ID);
   if (m_current_token.type.value() == TokenType::ASSIGN) {
     eat(TokenType::ASSIGN);
@@ -299,13 +389,38 @@ void Interpreter::handle_variable() {
     case TokenType::LPAREN:
     case TokenType::MINUS:
     case TokenType::ID: {
-      int64_t res = expr();
+      Literal res = expr();
       m_variables.insert_or_assign(id, res);
+    } break;
+    case TokenType::NIL: {
+      Literal literal = {.type = LiteralType::NIL};
+      m_variables.insert_or_assign(id, literal);
     } break;
     default:
       break;
     }
-  } else {
+  }
+
+  else if (m_current_token.type == TokenType::ASSIGN_REF) {
+    eat(TokenType::ASSIGN_REF);
+    std::string src_id{m_current_token.id.value()};
+    eat(TokenType::ID);
+    if (m_variables.contains(src_id)) {
+      Literal literal = {.type = m_variables.at(src_id).type, .is_ref = true};
+      if (m_variables.at(src_id).type == LiteralType::NIL) {
+        literal.as.ref = nullptr;
+      } else if (m_variables.at(src_id).type == LiteralType::INTEGER) {
+        literal.as.ref = static_cast<void *>(&m_variables.at(src_id).as.i64);
+      } else if (m_variables.at(src_id).type == LiteralType::FLOAT) {
+        literal.as.ref = static_cast<void *>(&m_variables.at(src_id).as.f64);
+      }
+      m_variables.insert_or_assign(id, literal);
+    }
+  }
+
+  else {
     error("Expected primary expression.");
   }
 }
+
+#undef CHECK_AND_PERFORM
