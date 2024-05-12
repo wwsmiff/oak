@@ -42,17 +42,19 @@ constexpr std::array<std::string_view, static_cast<size_t>(TokenType::N_TYPES)>
 constexpr std::array<std::string_view, 3> reserved_keywords_v{
     {"print", "nil", "decl"}};
 
+struct As {
+  union {
+    int64_t i64;
+    double f64;
+    void *ref;
+  };
+};
+
 struct Literal {
   LiteralType type{};
   bool is_ref{};
   LiteralType *ref_type{};
-  struct as {
-    union {
-      int64_t i64;
-      double f64;
-      void *ref;
-    };
-  } as;
+  As as;
 };
 
 struct Token {

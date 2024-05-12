@@ -196,9 +196,9 @@ Literal Interpreter::factor() {
       if (literal.is_ref) {
         if (*literal.ref_type != LiteralType::NIL) {
           if (*literal.ref_type == LiteralType::INTEGER) {
-            res.as.i64 = *(static_cast<int64_t *>(literal.as.ref));
+            res.as.i64 = (static_cast<As *>(literal.as.ref))->i64;
           } else if (*literal.ref_type == LiteralType::FLOAT) {
-            res.as.f64 = *(static_cast<float *>(literal.as.ref));
+            res.as.f64 = (static_cast<As *>(literal.as.ref))->f64;
           }
         }
         res.type = *literal.ref_type;
@@ -428,10 +428,8 @@ void Interpreter::handle_variable() {
       };
       if (m_variables.at(src_id).type == LiteralType::NIL) {
         literal.as.ref = nullptr;
-      } else if (m_variables.at(src_id).type == LiteralType::INTEGER) {
-        literal.as.ref = static_cast<void *>(&m_variables.at(src_id).as.i64);
-      } else if (m_variables.at(src_id).type == LiteralType::FLOAT) {
-        literal.as.ref = static_cast<void *>(&m_variables.at(src_id).as.f64);
+      } else {
+        literal.as.ref = static_cast<void *>(&m_variables.at(src_id).as);
       }
       m_variables.insert_or_assign(id, literal);
     }
