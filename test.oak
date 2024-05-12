@@ -1,8 +1,15 @@
+decl debug = 0
+
 a = 8
 b = a
+print a
 print b
 a = a + (2 ** 3) ** 2
+print a
 b -> a
 print b
-a = 12
+a = 23.5
+print b
+a = nil
+print a
 print b

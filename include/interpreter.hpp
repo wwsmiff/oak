@@ -25,6 +25,7 @@ enum class TokenType {
   ID,
   PRINT,
   NIL,
+  DECL,
   END_OF_FILE,
   N_TYPES,
 };
@@ -34,12 +35,17 @@ enum class LiteralType : uint8_t { NIL, INTEGER, FLOAT, BOOLEAN, N_TYPES };
 constexpr std::array<std::string_view, static_cast<size_t>(TokenType::N_TYPES)>
     type_string_table_v{{"INTEGER", "PLUS", "MINUS", "STAR", "SLASH",
                          "POWER_OF", "LPAREN", "RPAREN", "ASSIGN", "ASSIGN_REF",
-                         "IS_EQ", "ID", "PRINT", "NIL", "END_OF_FILE"}};
+                         "IS_EQ", "ID", "PRINT", "NIL",
+                         "DECL"
+                         "END_OF_FILE"}};
 
-constexpr std::array<std::string_view, 2> reserved_keywords_v{{"print", "nil"}};
+constexpr std::array<std::string_view, 3> reserved_keywords_v{
+    {"print", "nil", "decl"}};
 
 struct Literal {
   LiteralType type{};
+  bool is_ref{};
+  LiteralType *ref_type{};
   struct as {
     union {
       int64_t i64;
@@ -47,36 +53,18 @@ struct Literal {
       void *ref;
     };
   } as;
-  bool is_ref{};
 };
 
 struct Token {
   std::optional<TokenType> type{};
   std::optional<Literal> value{};
   std::optional<std::string> id{};
-
-  // std::string str() const {
-  // if (type && value) {
-  // return std::format(
-  // "Token(.type = {}, .value = {})",
-  // type_string_table_v.at(static_cast<size_t>(type.value())),
-  // value.value());
-  // } else if (type && !value) {
-  // return std::format(
-  // "Token(.type = {}, .value = {})",
-  // type_string_table_v.at(static_cast<size_t>(type.value())), "NONE");
-  // }
-  // return std::format("Token(.type = {}, .value = {})", "NONE", "NONE");
-  // }
 };
 
 class Interpreter {
 public:
   Interpreter();
   Interpreter(const std::string &source);
-
-  static Interpreter create();
-
   void source(const std::string &source);
   void run();
 
@@ -86,6 +74,7 @@ private:
   Token m_current_token{};
   Token m_start_token{};
   std::unordered_map<std::string, Literal> m_variables{};
+  std::unordered_map<std::string, Literal> m_config{};
 
   void error(const std::string &message) const;
   Token advance();
@@ -97,4 +86,5 @@ private:
   std::string parse_id();
   void handle_print();
   void handle_variable();
+  void handle_decl();
 };

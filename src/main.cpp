@@ -28,12 +28,14 @@ int main(int argc, char **argv) {
   } else if (argc == 1) {
     std::ifstream input_file{argv[0]};
     for (; std::getline(input_file, line);) {
-      interpreter.source(line);
-      try {
-        interpreter.run();
-      } catch (const std::exception &e) {
-        std::cerr << e.what() << std::endl;
-        return EXIT_FAILURE;
+      if (!line.empty()) {
+        interpreter.source(line);
+        try {
+          interpreter.run();
+        } catch (const std::exception &e) {
+          std::cerr << e.what() << std::endl;
+          return EXIT_FAILURE;
+        }
       }
     }
   }

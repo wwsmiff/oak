@@ -42,10 +42,16 @@ std::ostream &operator<<(std::ostream &os, const Literal &literal) {
 }
 }; // namespace
 
-Interpreter::Interpreter() : m_source{}, m_pos{}, m_current_token{} {}
+Interpreter::Interpreter() : m_source{}, m_pos{}, m_current_token{} {
+  m_config.insert(
+      {"debug", Literal{.type = LiteralType::INTEGER, .as{.i64 = 0}}});
+}
 
 Interpreter::Interpreter(const std::string &source)
-    : m_source{source}, m_pos{}, m_current_token{} {}
+    : m_source{source}, m_pos{}, m_current_token{} {
+  m_config.insert(
+      {"debug", Literal{.type = LiteralType::INTEGER, .as{.i64 = 0}}});
+}
 
 void Interpreter::source(const std::string &source) {
   m_source = source;
@@ -79,6 +85,9 @@ Token Interpreter::advance() {
       return Token{.type = TokenType::PRINT, .value = std::nullopt, .id = id};
     } else if (id == "nil") {
       return Token{.type = TokenType::NIL, .value = std::nullopt, .id = id};
+    } else if (id == "decl") {
+      return Token{
+          .type = TokenType::DECL, .value = std::nullopt, .id = std::nullopt};
     }
     return Token{.type = TokenType::ID, .value = std::nullopt, .id = id};
   }
@@ -183,25 +192,23 @@ Literal Interpreter::factor() {
   } else if (token.type == TokenType::ID) {
     std::string id{token.id.value()};
     if (m_variables.contains(id)) {
-      const Literal &literal = m_variables.at(id);
+      const Literal literal = m_variables.at(id);
       if (literal.is_ref) {
-        if (literal.type == LiteralType::INTEGER) {
-          res.as.i64 = *(static_cast<int64_t *>(literal.as.ref));
-          res.type = LiteralType::INTEGER;
-        } else if (literal.type == LiteralType::FLOAT) {
-          res.as.f64 = *(static_cast<float *>(literal.as.ref));
-          res.type = LiteralType::FLOAT;
-        } else if (literal.type == LiteralType::BOOLEAN) {
-          res.as.f64 = *(static_cast<bool *>(literal.as.ref));
-          res.type = LiteralType::BOOLEAN;
+        if (*literal.ref_type != LiteralType::NIL) {
+          if (*literal.ref_type == LiteralType::INTEGER) {
+            res.as.i64 = *(static_cast<int64_t *>(literal.as.ref));
+          } else if (*literal.ref_type == LiteralType::FLOAT) {
+            res.as.f64 = *(static_cast<float *>(literal.as.ref));
+          }
         }
+        res.type = *literal.ref_type;
       } else {
         res = literal;
       }
-      eat(TokenType::ID);
     } else {
       error(std::format("Variable '{}' does not exist.", id));
     }
+    eat(TokenType::ID);
   } else if (token.type == TokenType::LPAREN) {
     eat(TokenType::LPAREN);
     res = expr();
@@ -311,6 +318,9 @@ void Interpreter::run() {
     case TokenType::ID:
       handle_variable();
       break;
+    case TokenType::DECL:
+      handle_decl();
+      break;
     default:
       error("Unexpected token.");
       break;
@@ -366,13 +376,19 @@ void Interpreter::handle_print() {
   case TokenType::PLUS:
   case TokenType::LPAREN:
   case TokenType::MINUS:
-  case TokenType::NIL:
-  case TokenType::ID: {
+  case TokenType::NIL: {
     Literal res = expr();
     std::cout << res << std::endl;
     break;
   }
-
+  case TokenType::ID: {
+    Literal res = expr();
+    if (m_config.at("debug").as.i64) {
+      std::cout << m_current_token.id.value() << " = " << res << std::endl;
+    } else {
+      std::cout << res << std::endl;
+    }
+  }
   default:
     break;
   }
@@ -406,7 +422,10 @@ void Interpreter::handle_variable() {
     std::string src_id{m_current_token.id.value()};
     eat(TokenType::ID);
     if (m_variables.contains(src_id)) {
-      Literal literal = {.type = m_variables.at(src_id).type, .is_ref = true};
+      Literal literal = {
+          .is_ref = true,
+          .ref_type = &m_variables.at(src_id).type,
+      };
       if (m_variables.at(src_id).type == LiteralType::NIL) {
         literal.as.ref = nullptr;
       } else if (m_variables.at(src_id).type == LiteralType::INTEGER) {
@@ -420,6 +439,20 @@ void Interpreter::handle_variable() {
 
   else {
     error("Expected primary expression.");
+  }
+}
+
+void Interpreter::handle_decl() {
+  eat(TokenType::DECL);
+  std::string id{m_current_token.id.value()};
+  eat(TokenType::ID);
+  eat(TokenType::ASSIGN);
+  Literal literal = parse_digit();
+  eat(TokenType::INTEGER);
+  if (m_config.contains(id)) {
+    m_config.at(id) = literal;
+  } else {
+    error(std::format("Unknown declaration '{}'.", id));
   }
 }
 
